@@ -63,3 +63,4 @@ Despite the extreme volatility (approx. 6x that of Gold), Bitcoin's Sharpe Ratio
 
 3. Portfolio Implications
 The Dynamic Conditional Correlation (DCC) model reveals that the correlation between BTC and Gold fluctuates around a mean of -0.009, effectively zero. This suggests that while Bitcoin fails as a hedge, it succeeds as a diversifier. Its price movements are idiosyncratic and uncorrelated to traditional commodities, making it a valuable addition to a multi-asset portfolio for risk dilution—provided position sizing is small.
+.
