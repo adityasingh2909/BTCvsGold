@@ -1,0 +1,393 @@
+R version 4.5.1 (2025-06-13 ucrt) -- "Great Square Root"
+Copyright (C) 2025 The R Foundation for Statistical Computing
+Platform: x86_64-w64-mingw32/x64
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+[Previously saved workspace restored]
+
+> # ==============================================================================
+> #  BITCOIN VS GOLD (INFLATION REGIMES)
+> # ==============================================================================
+> #  Post-2012 Data Filter applied to remove early-market outliers.
+> # ==============================================================================
+> 
+> # 1. SETUP & LIBRARIES
+> # ==============================================================================
+> options(warn = -1) # Suppress warnings for cleaner output
+> cat("Loading libraries...\n")
+Loading libraries...
+> 
+> if(!require(tidyverse)) install.packages("tidyverse")
+Loading required package: tidyverse
+── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
+✔ dplyr     1.2.0     ✔ readr     2.1.6
+✔ forcats   1.0.1     ✔ stringr   1.5.2
+✔ ggplot2   4.0.2     ✔ tibble    3.3.0
+✔ lubridate 1.9.5     ✔ tidyr     1.3.2
+✔ purrr     1.1.0     
+── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
+✖ dplyr::filter() masks stats::filter()
+✖ dplyr::lag()    masks stats::lag()
+ℹ Use the conflicted package (<http://conflicted.r-lib.org/>) to force all conflicts to become errors
+> if(!require(lubridate)) install.packages("lubridate")
+> if(!require(rugarch)) install.packages("rugarch")
+Loading required package: rugarch
+Loading required package: parallel
+
+Attaching package: ‘rugarch’
+
+The following object is masked from ‘package:purrr’:
+
+    reduce
+
+> if(!require(rmgarch)) install.packages("rmgarch")
+Loading required package: rmgarch
+
+Attaching package: ‘rmgarch’
+
+The following objects are masked from ‘package:dplyr’:
+
+    first, last
+
+> if(!require(xts)) install.packages("xts")
+Loading required package: xts
+Loading required package: zoo
+
+Attaching package: ‘zoo’
+
+The following objects are masked from ‘package:base’:
+
+    as.Date, as.Date.numeric
+
+
+######################### Warning from 'xts' package ##########################
+#                                                                             #
+# The dplyr lag() function breaks how base R's lag() function is supposed to  #
+# work, which breaks lag(my_xts). Calls to lag(my_xts) that you type or       #
+# source() into this session won't work correctly.                            #
+#                                                                             #
+# Use stats::lag() to make sure you're not using dplyr::lag(), or you can add #
+# conflictRules('dplyr', exclude = 'lag') to your .Rprofile to stop           #
+# dplyr from breaking base R's lag() function.                                #
+#                                                                             #
+# Code in packages is not affected. It's protected by R's namespace mechanism #
+# Set `options(xts.warn_dplyr_breaks_lag = FALSE)` to suppress this warning.  #
+#                                                                             #
+###############################################################################
+
+Attaching package: ‘xts’
+
+The following objects are masked from ‘package:rmgarch’:
+
+    first, last
+
+The following objects are masked from ‘package:dplyr’:
+
+    first, last
+
+> if(!require(PerformanceAnalytics)) install.packages("PerformanceAnalytics")
+Loading required package: PerformanceAnalytics
+
+Attaching package: ‘PerformanceAnalytics’
+
+The following object is masked from ‘package:graphics’:
+
+    legend
+
+> if(!require(quantmod)) install.packages("quantmod")
+Loading required package: quantmod
+Loading required package: TTR
+Registered S3 method overwritten by 'quantmod':
+  method            from
+  as.zoo.data.frame zoo 
+> 
+> library(tidyverse)
+> library(lubridate)
+> library(rugarch)
+> library(rmgarch)
+> library(xts)
+> library(PerformanceAnalytics)
+> library(quantmod)
+> 
+> cat("Libraries loaded successfully.\n\n")
+Libraries loaded successfully.
+
+> 
+> # ==============================================================================
+> # 2. DATA LOADING & CLEANING
+> # ==============================================================================
+> 
+> # Helper function for robust date parsing
+> parse_robust <- function(x) {
++   as.Date(parse_date_time(x, orders = c("ymd", "mdy", "dmy", "Ymd", "m/d/Y", "d/m/Y")))
++ }
+> 
+> # --- A. Load Bitcoin Data ---
+> cat("Loading Bitcoin Data...")
+Loading Bitcoin Data...> btc_raw <- read_csv("BitCoinEXCEL.csv", show_col_types = FALSE)
+
+[1mindexing[0m [34mBitCoinEXCEL.csv[0m [=================================] [32m1.70GB/s[0m, eta: [36m 0s[0m
+                                                                                                                   
+New names:
+• `` -> `...2`
+> 
+> # Clean and aggregate to Monthly
+> btc_clean <- btc_raw %>%
++   select(Date_Raw = 1, Price_Raw = 2) %>%
++   mutate(
++     Date = parse_robust(Date_Raw),
++     Price = as.numeric(gsub(",", "", Price_Raw))
++   ) %>%
++   filter(!is.na(Date)) %>%
++   arrange(Date) %>%
++   # Monthly Aggregation (Last price of the month)
++   group_by(MonthID = format(Date, "%Y-%m")) %>%
++   slice(n()) %>%
++   ungroup() %>%
++   select(Date_BTC = Date, MonthID, Price_BTC = Price)
+> cat(" Done.\n")
+ Done.
+> 
+> # --- B. Load Gold Data ---
+> cat("Loading Gold Data...")
+Loading Gold Data...> gold_raw <- read_csv("chart_20260206T063538.csv", show_col_types = FALSE)
+
+[1mindexing[0m [34mchart_20260206T063538.csv[0m [========================] [32m1.96GB/s[0m, eta: [36m 0s[0m
+                                                                                                                   
+> 
+> gold_clean <- gold_raw %>%
++   select(Date_Raw = 1, Price_Raw = 2) %>%
++   mutate(
++     Date = parse_robust(Date_Raw),
++     Price_Gold = as.numeric(gsub(",", "", Price_Raw))
++   ) %>%
++   filter(!is.na(Date)) %>%
++   arrange(Date) %>%
++   mutate(MonthID = format(Date, "%Y-%m")) %>%
++   select(MonthID, Price_Gold)
+> cat(" Done.\n")
+ Done.
+> 
+> # --- C. Load & Forecast Inflation (HICP) ---
+> cat("Loading Inflation Data...")
+Loading Inflation Data...> hicp_raw <- read_csv("Eurozone Harmonised Index of Consumer Prices (HICP) - All Items.csv", 
++                      show_col_types = FALSE)
+
+[1mindexing[0m [34mEurozone Harmonised Index of Consumer Prices (HICP) - All Items.csv[0m [] [32m481.15MB/s[0m, eta: [36m 0s[0m
+                                                                                                                   
+> 
+> hicp_history <- hicp_raw %>%
++   select(Date_Raw = 1, Value_Raw = 2) %>%
++   mutate(Date = parse_robust(Date_Raw), Value = as.numeric(Value_Raw)) %>%
++   select(Date, Value)
+> 
+> # Manually append 2025-2026 Forecast (Base 2015=100)
+> hicp_future <- tribble(
++   ~Date,        ~Value,
++   "2025-01-01", 130.09, "2025-02-01", 130.42, "2025-03-01", 130.81,
++   "2025-04-01", 131.00, "2025-05-01", 130.70, "2025-06-01", 131.05,
++   "2025-07-01", 131.02, "2025-08-01", 131.18, "2025-09-01", 132.05,
++   "2025-10-01", 132.15, "2025-11-01", 132.18, "2025-12-01", 131.93,
++   "2026-01-01", 132.30
++ ) %>% mutate(Date = ymd(Date))
+> 
+> inflation_final <- bind_rows(hicp_history, hicp_future) %>%
++   arrange(Date) %>%
++   mutate(
++     Inflation_YoY = (Value / lag(Value, 12)) - 1,
++     MonthID = format(Date, "%Y-%m")
++   ) %>%
++   filter(!is.na(Inflation_YoY)) %>%
++   select(MonthID, Inflation_YoY)
+> cat(" Done.\n")
+ Done.
+> 
+> # ==============================================================================
+> # 3. MERGING & FILTERING 
+> # ==============================================================================
+> 
+> # Merge Datasets
+> merged_data <- btc_clean %>%
++   inner_join(gold_clean, by = "MonthID") %>%
++   inner_join(inflation_final, by = "MonthID") %>%
++   arrange(Date_BTC)
+> 
+> # *** CRITICAL FIX: REMOVING PRE-2012 OUTLIERS ***
+> # This removes the "Genesis" period where BTC had 5,900% monthly returns
+> # and makes the analysis academically robust.
+> model_data <- merged_data %>%
++   filter(Date_BTC >= "2012-01-01") %>%
++   mutate(
++     High_Inflation = ifelse(Inflation_YoY > 0.03, 1, 0) # 3% Threshold
++   )
+> 
+> cat(sprintf("\nData Merged & Cleaned. Study Period: %s to %s\n", 
++             min(model_data$Date_BTC), max(model_data$Date_BTC)))
+
+Data Merged & Cleaned. Study Period: 2012-01-31 to 2026-01-31
+> cat(sprintf("High Inflation Months identified: %d\n", sum(model_data$High_Inflation)))
+High Inflation Months identified: 27
+> 
+> # ==============================================================================
+> # 4. CALCULATING RETURNS
+> # ==============================================================================
+> 
+> # Convert to Time Series (xts)
+> ts_prices <- xts(model_data[, c("Price_BTC", "Price_Gold")], order.by = model_data$Date_BTC)
+> 
+> # Calculate Log Returns
+> ts_ret <- Return.calculate(ts_prices, method = "log")[-1, ]
+> colnames(ts_ret) <- c("Bitcoin", "Gold")
+> 
+> # ==============================================================================
+> # 5. ECONOMETRIC MODELING (GARCH & DCC)
+> # ==============================================================================
+> 
+> cat("\nFitting GARCH & DCC Models (this may take a moment)...\n")
+
+Fitting GARCH & DCC Models (this may take a moment)...
+> 
+> # A. Specify GARCH(1,1) with Student-t Distribution
+> spec_garch <- ugarchspec(
++   mean.model = list(armaOrder = c(0,0)),
++   variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
++   distribution.model = "std"
++ )
+> 
+> # B. Fit Univariate Models
+> fit_btc <- ugarchfit(spec_garch, data = ts_ret[,"Bitcoin"])
+> fit_gold <- ugarchfit(spec_garch, data = ts_ret[,"Gold"])
+> 
+> # C. Fit DCC-GARCH (Dynamic Correlation)
+> dcc_spec <- dccspec(uspec = multispec(replicate(2, spec_garch)), 
++                     dccOrder = c(1,1), distribution = "mvt")
+> dcc_fit <- dccfit(dcc_spec, data = ts_ret)
+> 
+> # D. Extract Parameters
+> # Volatility Persistence (Alpha + Beta)
+> persist_btc  <- sum(coef(fit_btc)[c("alpha1", "beta1")])
+> persist_gold <- sum(coef(fit_gold)[c("alpha1", "beta1")])
+> 
+> # Dynamic Correlation Series
+> rho_dcc <- rcor(dcc_fit)[1, 2, ]
+> mean_rho <- mean(rho_dcc)
+> 
+> cat("Modeling Complete.\n")
+Modeling Complete.
+> 
+> # ==============================================================================
+> # 6. HYPOTHESIS TESTING (H1 - H5)
+> # ==============================================================================
+> 
+> # --- H1: Risk-Adjusted Returns ---
+> ann_ret <- Return.annualized(ts_ret, scale = 12)
+> ann_vol <- StdDev.annualized(ts_ret, scale = 12)
+> sharpe  <- ann_ret / ann_vol
+> 
+> # --- H4 & H5: Regime Analysis ---
+> # Subset returns based on Inflation Regime
+> dates_high <- model_data$Date_BTC[model_data$High_Inflation == 1]
+> # Match indices
+> idx_high <- index(ts_ret) %in% dates_high
+> 
+> ret_high <- ts_ret[idx_high, ]
+> ret_low  <- ts_ret[!idx_high, ]
+> 
+> # Drawdowns in High Inflation (H4)
+> dd_btc_high  <- PerformanceAnalytics::maxDrawdown(ret_high[,"Bitcoin"])
+> dd_gold_high <- PerformanceAnalytics::maxDrawdown(ret_high[,"Gold"])
+> 
+> # Volatility in Regimes (H5)
+> vol_btc_high  <- StdDev.annualized(ret_high[,"Bitcoin"], scale = 12)
+> vol_gold_high <- StdDev.annualized(ret_high[,"Gold"], scale = 12)
+> vol_btc_low   <- StdDev.annualized(ret_low[,"Bitcoin"], scale = 12)
+> vol_gold_low  <- StdDev.annualized(ret_low[,"Gold"], scale = 12)
+> 
+> # ==============================================================================
+> # 7. FINAL OUTPUT & SYNTHESIS
+> # ==============================================================================
+> 
+> cat("\n================================================================\n")
+
+================================================================
+> cat(" FINAL THESIS RESULTS (2012-2026)\n")
+ FINAL RESULTS (2012-2026)
+> cat("================================================================\n")
+================================================================
+> cat(sprintf("%-25s %-15s %-15s\n", "METRIC", "BITCOIN", "GOLD"))
+METRIC                    BITCOIN         GOLD           
+> cat("----------------------------------------------------------------\n")
+----------------------------------------------------------------
+> 
+> # H1 Results
+> cat(sprintf("%-25s %8.1f%%       %8.1f%%\n", "Annualized Return", ann_ret[1]*100, ann_ret[2]*100))
+Annualized Return             34.4%            5.9%
+> cat(sprintf("%-25s %8.1f%%       %8.1f%%\n", "Annualized Volatility", ann_vol[1]*100, ann_vol[2]*100))
+Annualized Volatility         88.2%           14.6%
+> cat(sprintf("%-25s %8.3f         %8.3f\n", "Sharpe Ratio", sharpe[1], sharpe[2]))
+Sharpe Ratio                 0.391            0.405
+> 
+> # H2 Results
+> cat(sprintf("%-25s %8.4f         %8.4f\n", "Volatility Persistence", persist_btc, persist_gold))
+Volatility Persistence      0.9990           0.9989
+> 
+> # H3 Results
+> cat(sprintf("%-25s %-15s %8.4f\n", "Avg Correlation", "--", mean_rho))
+Avg Correlation           --               -0.0092
+> 
+> # H4 Results
+> cat(sprintf("%-25s %8.1f%%       %8.1f%%\n", "Max Drawdown (High Inf)", dd_btc_high*100, dd_gold_high*100))
+Max Drawdown (High Inf)       87.7%           16.6%
+> 
+> cat("----------------------------------------------------------------\n")
+----------------------------------------------------------------
+> cat("REGIME ANALYSIS (Low vs High Inflation):\n")
+REGIME ANALYSIS (Low vs High Inflation):
+> cat(sprintf("  BTC Volatility:  %.1f%% (Low)  ->  %.1f%% (High)\n", vol_btc_low*100, vol_btc_high*100))
+  BTC Volatility:  89.9% (Low)  ->  70.7% (High)
+> cat(sprintf("  Gold Volatility: %.1f%% (Low)   ->  %.1f%% (High)\n", vol_gold_low*100, vol_gold_high*100))
+  Gold Volatility: 14.7% (Low)   ->  14.3% (High)
+> cat("================================================================\n")
+================================================================
+> 
+> # --- VISUALIZATION ---
+> # Plot 1: Cumulative Returns
+> chart.CumReturns(ts_ret, main = "Growth of $1: Bitcoin vs Gold (2012-2026)", 
++                  wealth.index = TRUE, legend.loc = "topleft", 
++                  colorset = c("orange", "gold"), lwd = 2)
+> 
+> # Plot 2: Dynamic Correlation
+> dev.new() # Open new window for second plot
+> plot(rho_dcc, type = "l", col = "blue", main = "Dynamic Correlation (DCC-GARCH)", 
++      ylim = c(-0.5, 0.5), ylab = "Correlation")
+> abline(h = 0, col = "red", lty = 2)
+> 
+> cat("\nSYNTHESIS OF FINDINGS:\n")
+
+SYNTHESIS OF FINDINGS:
+> cat("1. PERFORMANCE: Bitcoin and Gold have nearly identical Sharpe Ratios (approx 0.40),\n")
+1. PERFORMANCE: Bitcoin and Gold have nearly identical Sharpe Ratios (approx 0.40),
+> cat("   meaning BTC is an 'efficient' risk asset, not just a gamble.\n")
+   meaning BTC is an 'efficient' risk asset, not just a gamble.
+> cat("2. INFLATION HEDGE: Hypothesis REJECTED. During high inflation (>3%),\n")
+2. INFLATION HEDGE: Hypothesis REJECTED. During high inflation (>3%),
+> cat(sprintf("   Bitcoin suffered an %.1f%% drawdown, while Gold held at %.1f%%.\n", dd_btc_high*100, dd_gold_high*100))
+   Bitcoin suffered an 87.7% drawdown, while Gold held at 16.6%.
+> cat("3. DIVERSIFICATION: The near-zero correlation confirms BTC is a powerful portfolio diversifier.\n")
+3. DIVERSIFICATION: The near-zero correlation confirms BTC is a powerful portfolio diversifier.
+> 
+> # Restore warnings
+> options(warn = 0)
